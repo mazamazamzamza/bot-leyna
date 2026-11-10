@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: bot-leyna
+    env: node
+    plan: starter
+    region: oregon # ou frankfurt, singapore, etc.
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: TOKEN
+        sync: false
+      - key: CHANNEL_ID
+        sync: false
+      - key: ROLE_ID
+        value: "1547690932084936865"
+      - key: IMAGE_URL
+        sync: false
+      - key: MOD_GUILD_ID
+        value: "1547685592928751628"
+      - key: MOD_CHANNEL_ID
+        sync: false
+      - key: LOG_CHANNEL_ID
+        value: "1548532310415118376"
+      - key: VALIDATED_CHANNEL_ID
+        value: "1548532409153363968"
+      - key: FAILED_CHANNEL_ID
+        value: "1548532447786967052"
+      - key: DB_STATS_CHANNEL_ID
+        value: "1548535878509400184"
+      - key: ABSTRACT_API_KEY
+        sync: false
+      - key: VERIPHONE_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: SITE_SECRET
+        sync: false
+      - key: PORT
+        value: 3000
