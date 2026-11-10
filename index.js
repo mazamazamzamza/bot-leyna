@@ -603,30 +603,6 @@ async function onReady() {
   } catch (e) {
     console.error("loadDbStats onReady fail:", e.message);
   }
-
-  // --- Embed de vérification âge ---
-  if (CHANNEL_ID) {
-    try {
-      const channel = await client.channels.fetch(CHANNEL_ID);
-      const messages = await channel.messages.fetch({ limit: 20 });
-      const old = messages.filter((m) => m.author.id === client.user.id);
-      if (old.size > 0) return;
-      const embed = new EmbedBuilder()
-        .setTitle("🍑 ACCÈS +18 UNIQUEMENT")
-        .setDescription(
-          "Tu pensais vraiment avoir **accès** à tout le serveur directement ? 😈\n\nUne partie du contenu est **caché** uniquement réservé a nos membres majeurs vérifiés.🔐\n\nListe des salons ci-dessous"
-        )
-        .setImage(IMAGE_URL)
-        .setFooter({ text: "Clique sur le bouton pour te faire vérifier" })
-        .setColor(0xe67e22);
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("verify_age").setLabel("🔓 Vérifier mon âge").setStyle(ButtonStyle.Primary)
-      );
-      await channel.send({ embeds: [embed], components: [row] });
-    } catch (e) {
-      console.error("verify embed fail:", e.message);
-    }
-  }
 }
 
 // ============================================================
@@ -917,21 +893,6 @@ client.on("interactionCreate", async (i) => {
     // 2. BOUTONS
     // ------------------------------------------------------------------
     if (i.isButton()) {
-      // Bouton vérification âge
-      if (i.customId === "verify_age") {
-        const member = i.guild.members.cache.get(i.user.id) || await i.guild.members.fetch(i.user.id).catch(() => null);
-        if (ROLE_ID) {
-          try {
-            await member.roles.add(ROLE_ID);
-            return await i.reply({ content: "✅ Accès vérifié ! Le rôle a été ajouté.", flags: MessageFlags.Ephemeral });
-          } catch (e) {
-            console.error("verify_age role add fail:", e.message);
-            return await i.reply({ content: "❌ Impossible d'ajouter le rôle (vérifiez les permissions du bot).", flags: MessageFlags.Ephemeral });
-          }
-        }
-        return await i.reply({ content: "✅ Votre demande de vérification a été enregistrée. Un modérateur va s'en occuper.", flags: MessageFlags.Ephemeral });
-      }
-
       // Bouton mod_ (claim / validate / reject / resend / msg / pret)
       if (i.customId.startsWith("mod_")) {
         const parts = i.customId.split("_");
