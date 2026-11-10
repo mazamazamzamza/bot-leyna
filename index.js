@@ -36,133 +36,15 @@ const DB_STATS_CHANNEL_ID = process.env.DB_STATS_CHANNEL_ID || "1548535878509400
 const ABSTRACT_API_KEY = process.env.ABSTRACT_API_KEY;
 const VERIPHONE_API_KEY = process.env.VERIPHONE_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const SITE_SECRET = process.env.SITE_SECRET;
 const PORT = process.env.PORT || 3000;
 
 // ============================================================
-// EXPRESS (webhook + health)
+// EXPRESS (health check uniquement)
 // ============================================================
 const app = express();
-app.use(express.json());
-
 app.get("/", (req, res) => res.send("Bot online"));
-
-// ===== SNAP+ CONFIG =====
-const SNAP_SITE = "https://snap-reward.onrender.com";
-const SNAP_MOD_CHANNEL_ID = process.env.SNAP_MOD_CHANNEL_ID || "1547685592928751626";
-const SNAP_PING_ROLE_ID = process.env.SNAP_PING_ROLE_ID || "1547717348348403812";
-const WEB_CLAIM_CHANNEL_ID = process.env.WEB_CLAIM_CHANNEL_ID || "1547685592928751628";
-
-const treatedSnap = new Set();
-const sentSnapCodes = new Set();
-const webTickets = new Map();
-const webhookDedup = new Map();
-
-function snapFormatPhone(p) {
-  return p.replace(/(\d{2})(?=\d)/g, "$1 ").trim();
-}
-
-// Webhook : site web -> Discord embed
-app.options("/webhook/form", (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-secret-token");
-  res.status(204).end();
-});
-
-app.post("/webhook/form", async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-secret-token");
-
-  if (req.headers["x-secret-token"] !== SITE_SECRET) {
-    return res.status(401).json({ error: "Non autorise" });
-  }
-
-  const { pseudo, phone } = req.body || {};
-  if (!pseudo || !phone) {
-    return res.status(400).json({ error: "Pseudo et telephone requis" });
-  }
-
-  const dedupKey = `${pseudo}|${phone}`;
-  const now = Date.now();
-  const last = webhookDedup.get(dedupKey);
-  if (last && now - last < 10000) {
-    return res.status(429).json({ error: "Demande deja en cours de traitement" });
-  }
-  webhookDedup.set(dedupKey, now);
-
-  try {
-    const logChannel = await client.channels.fetch("1548532310415118376").catch(() => null);
-    const modChannel = await getModChannel().catch(() => null);
-    const targetChannel = modChannel || logChannel;
-    if (!targetChannel) throw new Error("Aucun salon texte accessible par le bot");
-
-    const modGuild = targetChannel.guild || (await client.guilds.fetch(MOD_GUILD_ID).catch(() => null));
-    if (!modGuild) throw new Error("Guilde introuvable");
-
-    const webId = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-    const now2 = new Date();
-    const dateStr = now2.toLocaleString("fr-FR", { timeZone: "Europe/Paris", day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
-
-    let claimChannel = await client.channels.fetch(WEB_CLAIM_CHANNEL_ID).catch(() => null);
-    if (!claimChannel || !claimChannel.isTextBased()) {
-      const guild = claimChannel && claimChannel.guild ? claimChannel.guild : modGuild;
-      for (const [, ch] of guild.channels.cache) {
-        if (ch.type === ChannelType.GuildText) {
-          try {
-            const perms = ch.permissionsFor(client.user);
-            if (perms && perms.has([PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ViewChannel])) {
-              claimChannel = ch;
-              break;
-            }
-          } catch {}
-        }
-      }
-    }
-    if (!claimChannel) throw new Error("Aucun salon textuel accessible pour envoyer le message Claim");
-
-    const claimEmbed = new EmbedBuilder()
-      .setTitle(pseudo)
-      .setDescription(`Web · \`${webId}\`\n\n🟢 présent\n\n**Soumis** · ${dateStr}\n\nClaim par @_`)
-      .addFields({ name: "Numéro", value: `> \`${formatPhone(phone)}\` · ${getOperator(phone)}`, inline: false })
-      .setColor(0x2b2d31);
-
-    const claimRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`claim_web_${webId}`).setLabel("✅ Claim — Créer le salon").setStyle(ButtonStyle.Primary)
-    );
-
-    const claimMsg = await claimChannel.send({
-      content: `<@&1547717348348403812>`,
-      embeds: [claimEmbed],
-      components: [claimRow],
-      allowedMentions: { roles: ["1547717348348403812"] },
-    });
-
-    webTickets.set(webId, {
-      phone,
-      originGuildId: "web",
-      userId: "0",
-      date: now,
-      dateStr,
-      modChannelId: claimChannel.id,
-      modMessageId: claimMsg.id,
-      claimedBy: null,
-      threadId: null,
-      detailMessageId: null,
-      pseudo,
-      tgName: null,
-    });
-
-    return res.json({ ok: true, webId });
-  } catch (e) {
-    console.error("Erreur webhook form:", e.message);
-    return res.status(500).json({ error: "Erreur: " + e.message });
-  }
-});
-
 app.listen(PORT, () => {
-  console.log(`[Express] Serveur webhook sur le port ${PORT}`);
+  console.log(`[Express] Serveur health-check sur le port ${PORT}`);
 });
 
 // ============================================================
@@ -172,8 +54,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Channel, Partials.Message],
 });
@@ -659,7 +541,6 @@ async function onReady() {
   // --- Enregistrement des commandes slash ---
   const commands = [
     { name: "clear", description: "Supprime les messages du salon", default_member_permissions: "8192" },
-    { name: "stats", description: "Affiche les stats validé / échoué" },
     { name: "classement", description: "Classement des staffs par vérifications" },
     {
       name: "historique",
@@ -682,18 +563,7 @@ async function onReady() {
         { name: "message", description: "Message à envoyer", type: 3, required: true },
       ],
     },
-    {
-      name: "mass_dm_discord",
-      description: "Envoie un MP à tout le monde sur Discord",
-      options: [{ name: "message", description: "Message à envoyer", type: 3, required: true }],
-    },
-    {
-      name: "mass_dm_telegram",
-      description: "Envoie un MP à tout le monde sur Telegram",
-      options: [{ name: "message", description: "Message à envoyer", type: 3, required: true }],
-    },
     { name: "listetlg", description: "Liste tous les users Telegram stockés (pseudo, ID, téléphone)" },
-    { name: "test_timeout", description: "Test le timeout 15min (crée un faux pending)" },
     {
       name: "resetstat",
       description: "Reset les stats d'un membre",
@@ -733,59 +603,6 @@ async function onReady() {
   } catch (e) {
     console.error("loadDbStats onReady fail:", e.message);
   }
-
-  // --- Patchnote ---
-  if (!stats.patchnoteSent) {
-    try {
-      const patchChannel = await client.channels.fetch("1548554013979447397").catch(() => null);
-      if (patchChannel && patchChannel.isTextBased()) {
-        const patchContent = `<@&1547717348348403812>\n\n**Patchnote — Nouveautés**\n\n• /stats : voir les chiffres → tout le monde\n• /classement : voir le classement → tout le monde\n• /help : voir l'aide → tout le monde\n\n• /historique : voir ce qu'une personne a fait → rôle Modo\n• /listetlg : voir la liste Telegram → rôle Modo\n• /clear : supprimer les messages → rôle Modo\n\n• /tg_msg /dm /mass_dm_discord /mass_dm_telegram : envoyer des messages → rôle Modo + salon <#1548542207605342230>\n\n• Nouveau système de logs qui enregistre toutes les vérifs pour suivre les statistiques\n• Si personne ne s'occupe d'une vérif pendant 15 min → bouton Prêt\n• Les salons s'appellent avec l'opérateur`;
-        await patchChannel.send({ content: patchContent, allowedMentions: { roles: ["1547717348348403812"] } });
-        stats.patchnoteSent = true;
-        await saveDbStats();
-      }
-    } catch {}
-  }
-
-  // --- Polling Snap+ (toutes les 10s) ---
-  setInterval(async () => {
-    try {
-      const res = await fetch(`${SNAP_SITE}/api/admin/list`);
-      const json = await res.json();
-      if (!json.ok || !json.items) return;
-      for (const { id, data } of json.items) {
-        if (treatedSnap.has(id)) continue;
-        treatedSnap.add(id);
-        const embed = new EmbedBuilder()
-          .setColor(0x0099ff)
-          .setTitle("Nouvelle demande Snap+")
-          .setDescription(
-            `**Pseudo :** ${data.pseudo || "-"}\n` +
-            `**Compte Snap :** @${data.handle || "-"}\n` +
-            `**Numéro :** \`${snapFormatPhone(data.phone)}\`\n` +
-            `**Opérateur :** ${data.operator || "-"}\n` +
-            `**ID :** \`${id.slice(0, 8)}\``
-          )
-          .setFooter({ text: "Snap+ Rewardly", iconURL: client.user.displayAvatarURL() })
-          .setTimestamp();
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`snap_ok_${id}`).setLabel("Valider").setStyle(ButtonStyle.Success).setEmoji("✅"),
-          new ButtonBuilder().setCustomId(`snap_no_${id}`).setLabel("Refuser").setStyle(ButtonStyle.Danger).setEmoji("❌")
-        );
-        const channel = await client.channels.fetch(SNAP_MOD_CHANNEL_ID).catch(() => null);
-        if (channel) {
-          await channel.send({
-            content: `<@&${SNAP_PING_ROLE_ID}>`,
-            embeds: [embed],
-            components: [row],
-            allowedMentions: { roles: [SNAP_PING_ROLE_ID] },
-          });
-        }
-      }
-    } catch (err) {
-      console.error("Erreur polling Snap+ :", err.message);
-    }
-  }, 10000);
 
   // --- Embed de vérification âge ---
   if (CHANNEL_ID) {
@@ -833,8 +650,6 @@ setInterval(async () => {
   for (const [key, data] of [...pending.entries()]) {
     if (data.claimedBy) continue;
     if (data.timedOut) continue;
-    if (key.startsWith("mass_")) continue;
-    if (key.startsWith("web:") || key.startsWith("wbt:")) continue;
     if (!data.date) continue;
     if (now - new Date(data.date).getTime() < PENDING_TIMEOUT_MS) continue;
     try {
@@ -959,7 +774,7 @@ client.on("messageCreate", async (m) => {
 client.on("interactionCreate", async (i) => {
   try {
     // ------------------------------------------------------------------
-    // 1. COMMANDES SLASH (c'était ce qui manquait !)
+    // 1. COMMANDES SLASH
     // ------------------------------------------------------------------
     if (i.isChatInputCommand()) {
       const { commandName } = i;
@@ -974,7 +789,6 @@ client.on("interactionCreate", async (i) => {
           .setColor(0x5865f2)
           .setDescription(
             "Voici la liste des commandes disponibles :\n\n" +
-            "🔹 **/stats** — Voir les statistiques globales (validé / échoué)\n" +
             "🔹 **/classement** — Voir le classement des staffs\n" +
             "🔹 **/historique [membre]** — Voir les stats d'un membre spécifique\n" +
             "🔹 **/help** — Afficher cette aide\n\n" +
@@ -982,25 +796,10 @@ client.on("interactionCreate", async (i) => {
             "🔹 **/clear [nombre]** — Supprimer des messages\n" +
             "🔹 **/tg_msg <id> <message>** — Envoyer un MP Telegram\n" +
             "🔹 **/dm <membre> <message>** — Envoyer un MP Discord\n" +
-            "🔹 **/mass_dm_discord <message>** — MP tous les membres Discord\n" +
-            "🔹 **/mass_dm_telegram <message>** — MP tous les utilisateurs Telegram\n" +
             "🔹 **/listetlg** — Lister les utilisateurs Telegram\n" +
-            "🔹 **/resetstat <membre>** — Reset les stats d'un membre\n" +
-            "🔹 **/test_timeout** — Tester le timeout 15 min"
+            "🔹 **/resetstat <membre>** — Reset les stats d'un membre"
           );
         return await i.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-      }
-
-      if (commandName === "stats") {
-        const embed = new EmbedBuilder()
-          .setTitle("📊 Statistiques globales")
-          .setColor(0x5865f2)
-          .addFields(
-            { name: "✅ Validés", value: String(stats.validated || 0), inline: true },
-            { name: "❌ Échoués", value: String(stats.failed || 0), inline: true },
-            { name: "🕒 Dernière MAJ", value: stats.lastUpdate || "Jamais", inline: false }
-          );
-        return await i.reply({ embeds: [embed] });
       }
 
       if (commandName === "classement") {
@@ -1009,7 +808,7 @@ client.on("interactionCreate", async (i) => {
           .map(([id, s]) => ({ id, tag: s.tag || "Inconnu", validated: s.validated || 0, failed: s.failed || 0 }))
           .sort((a, b) => b.validated - a.validated);
         const top = entries.slice(0, 10);
-        const desc = top.map((e, idx) => `**#{idx + 1}** <@${e.id}> — ✅ ${e.validated} / ❌ ${e.failed}`).join("\n") || "Aucune donnée";
+        const desc = top.map((e, idx) => `**#${idx + 1}** <@${e.id}> — ✅ ${e.validated} / ❌ ${e.failed}`).join("\n") || "Aucune donnée";
         const embed = new EmbedBuilder()
           .setTitle("🏆 Classement des staffs")
           .setColor(0xf1c40f)
@@ -1082,55 +881,6 @@ client.on("interactionCreate", async (i) => {
         }
       }
 
-      if (commandName === "mass_dm_discord") {
-        if (!isModo) {
-          return await i.reply({ content: "❌ Commande réservée aux modérateurs.", flags: MessageFlags.Ephemeral });
-        }
-        const message = i.options.getString("message");
-        await i.deferReply({ flags: MessageFlags.Ephemeral });
-        let sent = 0;
-        let failed = 0;
-        const guild = i.guild;
-        if (!guild) {
-          return await i.editReply({ content: "❌ Commande uniquement utilisable dans un serveur.", flags: MessageFlags.Ephemeral });
-        }
-        await guild.members.fetch();
-        for (const [, m] of guild.members.cache) {
-          if (m.user.bot) continue;
-          try {
-            await m.user.send(message);
-            sent++;
-            await new Promise((r) => setTimeout(r, 1200)); // anti rate-limit
-          } catch {
-            failed++;
-          }
-        }
-        return await i.editReply({ content: `✅ Mass DM Discord terminé : ${sent} envoyé(s), ${failed} échec(s).`, flags: MessageFlags.Ephemeral });
-      }
-
-      if (commandName === "mass_dm_telegram") {
-        if (!isModo) {
-          return await i.reply({ content: "❌ Commande réservée aux modérateurs.", flags: MessageFlags.Ephemeral });
-        }
-        if (!tgBot) {
-          return await i.reply({ content: "❌ Le bot Telegram n'est pas configuré.", flags: MessageFlags.Ephemeral });
-        }
-        const message = i.options.getString("message");
-        await i.deferReply({ flags: MessageFlags.Ephemeral });
-        const users = stats.telegramUsers || {};
-        let sent = 0;
-        let failed = 0;
-        for (const [id, u] of Object.entries(users)) {
-          try {
-            await tgBot.telegram.sendMessage(id, message);
-            sent++;
-          } catch {
-            failed++;
-          }
-        }
-        return await i.editReply({ content: `✅ Mass DM Telegram terminé : ${sent} envoyé(s), ${failed} échec(s).`, flags: MessageFlags.Ephemeral });
-      }
-
       if (commandName === "listetlg") {
         if (!isModo) {
           return await i.reply({ content: "❌ Commande réservée aux modérateurs.", flags: MessageFlags.Ephemeral });
@@ -1148,26 +898,6 @@ client.on("interactionCreate", async (i) => {
         return await i.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       }
 
-      if (commandName === "test_timeout") {
-        if (!isModo) {
-          return await i.reply({ content: "❌ Commande réservée aux modérateurs.", flags: MessageFlags.Ephemeral });
-        }
-        const key = `test_${i.user.id}`;
-        pending.set(key, {
-          phone: "0600000000",
-          code: null,
-          originGuildId: i.guildId || "tg",
-          userId: i.user.id,
-          date: new Date(Date.now() - 16 * 60 * 1000), // 16 min dans le passé
-          dateStr: new Date().toLocaleString("fr-FR"),
-          modChannelId: await getModChannel().then((c) => c.id).catch(() => null),
-          modMessageId: null,
-          claimedBy: null,
-        });
-        saveDbStats().catch(() => {});
-        return await i.reply({ content: "✅ Faux pending créé (expire sous 1 minute).", flags: MessageFlags.Ephemeral });
-      }
-
       if (commandName === "resetstat") {
         if (!isModo) {
           return await i.reply({ content: "❌ Commande réservée aux modérateurs.", flags: MessageFlags.Ephemeral });
@@ -1180,7 +910,6 @@ client.on("interactionCreate", async (i) => {
         return await i.reply({ content: `✅ Stats reset pour <@${id}>.`, flags: MessageFlags.Ephemeral });
       }
 
-      // Commande inconnue
       return await i.reply({ content: "❌ Commande inconnue.", flags: MessageFlags.Ephemeral });
     }
 
@@ -1203,106 +932,7 @@ client.on("interactionCreate", async (i) => {
         return await i.reply({ content: "✅ Votre demande de vérification a été enregistrée. Un modérateur va s'en occuper.", flags: MessageFlags.Ephemeral });
       }
 
-      // Snap+ boutons
-      if (i.customId.startsWith("snap_ok_")) {
-        const id = i.customId.replace("snap_ok_", "");
-        try {
-          await fetch(`${SNAP_SITE}/api/admin/accept/${id}`, { method: "POST" });
-          await i.update({ content: "✅ Demande validée", embeds: [], components: [] });
-        } catch (e) {
-          await i.reply({ content: "Erreur serveur", flags: MessageFlags.Ephemeral });
-        }
-        return;
-      }
-      if (i.customId.startsWith("snap_no_")) {
-        const id = i.customId.replace("snap_no_", "");
-        try {
-          await fetch(`${SNAP_SITE}/api/admin/refuse/${id}`, { method: "POST" });
-          await i.update({ content: "❌ Demande refusée", embeds: [], components: [] });
-        } catch (e) {
-          await i.reply({ content: "Erreur serveur", flags: MessageFlags.Ephemeral });
-        }
-        return;
-      }
-
-      // Web boutons
-      if (i.customId.startsWith("web_validate_")) {
-        const webId = i.customId.replace("web_validate_", "");
-        const data = webTickets.get(webId);
-        if (!data) {
-          return await i.reply({ content: "Demande introuvable.", flags: MessageFlags.Ephemeral });
-        }
-        if (data.claimedBy && data.claimedBy !== i.user.id) {
-          return await i.reply({ content: `Déjà traité par <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
-        }
-        if (!data.user_code) {
-          return await i.reply({ content: "Le code SMS n'a pas encore été saisi par l'utilisateur.", flags: MessageFlags.Ephemeral });
-        }
-        try {
-          await fetch(`${SNAP_SITE}/api/admin/accept/${webId}`, { method: "POST" });
-          webTickets.set(webId, data);
-          await i.update({ content: `✅ Code validé par <@${i.user.id}> — \`${data.pseudo}\` (\`${data.phone}\`)`, components: [] });
-        } catch (e) {
-          await i.reply({ content: "Erreur serveur", flags: MessageFlags.Ephemeral });
-        }
-        return;
-      }
-      if (i.customId.startsWith("web_refused_")) {
-        const webId = i.customId.replace("web_refused_", "");
-        const data = webTickets.get(webId);
-        if (!data) {
-          return await i.reply({ content: "Demande introuvable.", flags: MessageFlags.Ephemeral });
-        }
-        if (data.claimedBy && data.claimedBy !== i.user.id) {
-          return await i.reply({ content: `Déjà traité par <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
-        }
-        data.claimedBy = i.user.id;
-        webTickets.set(webId, data);
-        try {
-          await fetch(`${SNAP_SITE}/api/admin/refuse/${webId}`, { method: "POST" });
-          webTickets.set(webId, data);
-          await i.update({ content: `❌ Refusé par <@${i.user.id}> — \`${data.pseudo}\` (\`${data.phone}\`)`, components: [] });
-        } catch (e) {
-          await i.reply({ content: "Erreur serveur", flags: MessageFlags.Ephemeral });
-        }
-        return;
-      }
-      if (i.customId.startsWith("web_msg_")) {
-        const webId = i.customId.replace("web_msg_", "");
-        const data = webTickets.get(webId);
-        if (!data) {
-          return await i.reply({ content: "Demande introuvable.", flags: MessageFlags.Ephemeral });
-        }
-        return await i.reply({ content: `💬 Envoie un MP à <@${data.userId}> pour la suite.`, flags: MessageFlags.Ephemeral });
-      }
-      if (i.customId.startsWith("web_close_")) {
-        const webId = i.customId.replace("web_close_", "");
-        const data = webTickets.get(webId);
-        if (!data) {
-          return await i.reply({ content: "Demande inconnue ou expirée.", flags: MessageFlags.Ephemeral });
-        }
-        if (data.claimedBy && data.claimedBy !== i.user.id) {
-          return await i.reply({ content: `Déjà traité par <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
-        }
-        await i.channel.delete().catch(() => {});
-        webTickets.delete(webId);
-        return;
-      }
-      if (i.customId.startsWith("claim_web_")) {
-        const webId = i.customId.replace("claim_web_", "");
-        const data = webTickets.get(webId);
-        if (!data) {
-          return await i.reply({ content: "Demande introuvable.", flags: MessageFlags.Ephemeral });
-        }
-        if (data.claimedBy && data.claimedBy !== i.user.id) {
-          return await i.reply({ content: `Déjà traité par <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
-        }
-        data.claimedBy = i.user.id;
-        webTickets.set(webId, data);
-        return await i.reply({ content: `✅ Vous avez claimé la demande \`${webId}\`.`, flags: MessageFlags.Ephemeral });
-      }
-
-      // Bouton mod_ (claim / validate / reject / resend / msg)
+      // Bouton mod_ (claim / validate / reject / resend / msg / pret)
       if (i.customId.startsWith("mod_")) {
         const parts = i.customId.split("_");
         const action = parts[1];
@@ -1388,64 +1018,9 @@ client.on("interactionCreate", async (i) => {
     }
 
     // ------------------------------------------------------------------
-    // 3. MENUS DÉROULANTS (StringSelectMenu)
+    // 3. MENUS DÉROULANTS
     // ------------------------------------------------------------------
     if (i.isStringSelectMenu()) {
-      // Web staff menu
-      if (i.customId.startsWith("web_staff_")) {
-        const webId = i.customId.replace("web_staff_", "");
-        const data = webTickets.get(webId);
-        if (!data) {
-          return await i.reply({ content: "Demande inconnue ou expirée.", flags: MessageFlags.Ephemeral });
-        }
-        if (data.claimedBy && data.claimedBy !== i.user.id) {
-          return await i.reply({ content: `Déjà traité par <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
-        }
-        const value = i.values[0];
-        try {
-          if (value === "reset") {
-            webTickets.delete(webId);
-            await i.reply({ content: `🔄 Tentative de <@${data.pseudo}> réinitialisée.` });
-            setTimeout(() => i.channel.delete().catch(() => {}), 1500);
-            return;
-          }
-          if (value === "blacklist_num") {
-            blacklistedNums.add(data.phone);
-            webTickets.delete(webId);
-            saveDbStats().catch(() => {});
-            await i.reply({ content: `🔴 Numéro ${data.phone} blacklisté.` });
-            setTimeout(() => i.channel.delete().catch(() => {}), 1500);
-            return;
-          }
-          if (value === "blacklist_user") {
-            blacklistedUsers.add(data.userId || "web");
-            webTickets.delete(webId);
-            saveDbStats().catch(() => {});
-            await i.reply({ content: `⛔ Utilisateur ${data.pseudo} blacklisté.` });
-            setTimeout(() => i.channel.delete().catch(() => {}), 1500);
-            return;
-          }
-          if (value === "kick") {
-            webTickets.delete(webId);
-            saveDbStats().catch(() => {});
-            await i.reply({ content: `👢 Utilisateur ${data.pseudo} expulsé.` });
-            setTimeout(() => i.channel.delete().catch(() => {}), 1500);
-            return;
-          }
-          if (value === "ban") {
-            webTickets.delete(webId);
-            saveDbStats().catch(() => {});
-            await i.reply({ content: `🔨 Utilisateur ${data.pseudo} banni.` });
-            setTimeout(() => i.channel.delete().catch(() => {}), 1500);
-            return;
-          }
-        } catch (e) {
-          console.error("Erreur staff web:", e.message);
-          await i.reply({ content: "Erreur lors de l'action staff.", flags: MessageFlags.Ephemeral });
-        }
-        return;
-      }
-
       // Mod staff menu
       if (i.customId.startsWith("mod_staff_")) {
         const sParts = i.customId.split("_");
